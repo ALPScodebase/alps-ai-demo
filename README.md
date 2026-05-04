@@ -1,4 +1,4 @@
-# A decentralized framework for automated and trustworthy royalty computation for AI model training data contributors
+# Fair Remuneration for AI Training Data: a Trustworthy Blockchain-based Approach
 
 This repository contains the implementation of a framework for remunerating training data contributors for generative AI models.  
 
@@ -184,38 +184,28 @@ cd chain
 npx hardhat run scripts/custom_benchmark.js --network localhost
 ```
 
-At this point:
+At this point, for each request:
 
-- The computation starts
-- The oracle consensus begins
-- Royalties are calculated
-
-The customer scripts use signer `NUM_ORACLES + 1`, after account `0` for the model creator and accounts `1..NUM_ORACLES` for oracle nodes.
+- The generation and attribution computation start.
+- The oracle consensus begins.
+- Royalties are calculated.
 
 You can monitor everything in the main Docker terminal.
-To check the current result through the Aggregator facade, use `verify.js` to inspect the first ten numbers of the vector.
+
+Note that the customer scripts use signer with index `NUM_ORACLES + 1`. Account with index `0` is used for the model creator and accounts `1..NUM_ORACLES` are used for representing oracle nodes.
 
 ## How to stop the environment
 
 To stop the execution of containers, press `CTRL+C` in the Docker terminal.
 
-<!--
-
-To rebuild the containers:
+To rebuild the containers, type:
 
 ```bash
 docker compose -f docker-compose.generated.yml --env-file .env down -v
 ```
 
-For the static Compose mode:
+To reset everything (deleting Docker's data), type:
 
-```bash
-docker compose down -v
-```
-
-To reset everything (deleting docker's data)
 ```bash
 docker system prune -a -f
 ```
-
--->
