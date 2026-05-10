@@ -117,13 +117,14 @@ The generated setup will:
 To run the script, open a new terminal in the root directory of the project. Note that, if no `.env` file exists, the runner creates it from `.env.example`. Then execute:
 
 ```bash
-scripts/run_generated_stack_toxiproxy.sh <NUMBER_OF_ORACLES> <NETWORK_SEED> [--malicious-alter-count N] [--malicious-timeout-count M] [--disable-latency]
+scripts/run_generated_stack_toxiproxy.sh <NUMBER_OF_ORACLES> <NETWORK_SEED> <MAX_OUTPUT_SIZE> [--malicious-alter-count N] [--malicious-timeout-count M] [--disable-latency]
 ```
 
 The script requires the following mandatory parameters:
 
 - `NUMBER_OF_ORACLES`: The number of oracle nodes to generate in the stack (e.g., `7`).
 - `NETWORK_SEED`: A seed for deterministic generation of oracle keys, latency, and malicious node selection (e.g., `123`).
+- `MAX_OUTPUT_SIZE`: Specifies the maximum length of outputs produced by the AI model (expressed in n. of characters).
 
 The script also accepts optional flags for malicious node configuration and latency control:
 
@@ -137,6 +138,14 @@ Finally, simulated network latency is enabled by default. The optional `--disabl
 
 This script uses the Toxiproxy framework (https://github.com/shopify/toxiproxy) to simulate latency. Note that Toxiproxy-based latency is used by default, which is compatible with all Docker hosts. If you are running on a Linux host with `tc netem` support, you can use the `scripts/run_generated_stack.sh` script instead to apply latency directly at the kernel level (do note that this tool supports network configuration with at most 15 oracles).
 
+**Notice:** It is also possible to specify a custom path for the Python interpreter that will be used by the `scripts/run_generated_stack_toxiproxy.sh` script. To do this, just type
+
+```bash
+export PYTHON_BIN="..."
+```
+
+before launching the script itself. Replace the dots `...` with the actual path.
+
 **Important**: Once you have launched the script, wait until you see the message:
 
 ```
@@ -146,7 +155,7 @@ This script uses the Toxiproxy framework (https://github.com/shopify/toxiproxy) 
 in the Docker logs before proceeding.
 
 
-### Step 3: Simulate the Workflow
+### Step 2: Simulate the Workflow
 
 Once the Docker infrastructure is up and running, you can simulate the main workflow of the system, which involves interactions between the **model creator** and the **customer** through the deployed smart contracts and oracle network.
 
