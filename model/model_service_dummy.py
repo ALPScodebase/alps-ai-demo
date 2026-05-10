@@ -8,14 +8,17 @@ from flask import Flask, request, jsonify
 
 APP_PORT = int(os.getenv("MODEL_SERVER_PORT", "9090"))
 APP_HOST = os.getenv("MODEL_SERVER_HOST", "0.0.0.0")
+MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "1800"))
+
 TRAIN_DATASET_HOLDERS_PATH = "./nanoGPT/data/shakespeare_char/holders.txt"
 TRAIN_DATASET_PATH = "./nanoGPT/data/shakespeare_char/train.bin"
-MAX_NEW_TOKENS = 1800 #300
+MODEL_LATENCY_FILE = "./nanoGPT/model_latency.tsv"
 BLOCK_SIZE = 64
 NORM_FACTOR = 1e18
 FILTER_POLICIES = ["TOP_VALUES", "TOP_HOLDERS"]
 HOLDERS_MAP = np.loadtxt(TRAIN_DATASET_HOLDERS_PATH, dtype=int).tolist() # Load holders map.
 train_data = np.memmap(TRAIN_DATASET_PATH, dtype=np.uint16, mode='r') # Load training dataset.
+model_latency_map = None
 
 app = Flask(__name__)
 
@@ -24,29 +27,35 @@ JOBS = {}
 jobs_lock = threading.Lock()
 JOB_QUEUE = queue.Queue()
 
+def load_latencies():
+    model_latencies = np.loadtxt(MODEL_LATENCY_FILE, delimiter="\t", skiprows=1)
+    sizes = []
+    dicts = []
+    for i in range(0, len(model_latencies)):
+        sizes.append(int(model_latencies[i][0]))
+        d = dict()
+        d['gen_mean'] = float(model_latencies[i][1])
+        d['gen_std'] = float(model_latencies[i][2])
+        d['att_mean'] = float(model_latencies[i][3])
+        d['att_std'] =  float(model_latencies[i][4])
+        dicts.append(d)
+    return dict(zip(sizes, dicts))
+
 def get_generation_time(num_tokens):
-    if num_tokens == 1800:
-        m = 4.437318 	
-        s = 0.256184
-    elif num_tokens == 30000:
-        m = 68.551691
-        s = 1.083338
-    else:
+    if not num_tokens in model_latency_map:
         raise ValueError("Error: invalid number of tokens.")
+    m = model_latency_map[num_tokens]['gen_mean']
+    s = model_latency_map[num_tokens]['gen_std']
     mu = np.log(m**2 / np.sqrt(s**2 + m**2))
     sigma = np.sqrt(np.log(1 + (s**2 / m**2)))
     delay = np.random.lognormal(mean=mu, sigma=sigma)
     return delay
 
 def get_attribution_time(num_tokens):
-    if num_tokens == 1800:
-        m = 36.073133
-        s = 0.103659 
-    elif num_tokens == 30000:
-        m = 43.699200
-        s = 0.597558
-    else:
+    if not num_tokens in model_latency_map:
         raise ValueError("Error: invalid number of tokens.")
+    m = model_latency_map[num_tokens]['att_mean']
+    s = model_latency_map[num_tokens]['att_std']
     mu = np.log(m**2 / np.sqrt(s**2 + m**2))
     sigma = np.sqrt(np.log(1 + (s**2 / m**2)))
     delay = np.random.lognormal(mean=mu, sigma=sigma)
@@ -197,9 +206,13 @@ def get_result(job_id):
     return jsonify(job), 200
 
 if __name__ == '__main__':
+    # Load model latencies.
+    model_latency_map = load_latencies()
+    print("[MODEL_SERVICE] Model latencies loaded successfully!")
+    #
+    print(f"[MODEL_SERVICE] Supporting queries producing {MAX_NEW_TOKENS} tokens")
     # Start the background worker before exposing the API
     threading.Thread(target=background_worker, daemon=True).start()
-
-    print(f"Starting server on {APP_HOST}:{APP_PORT}...")
+    print(f"[MODEL_SERVICE] Starting server on {APP_HOST}:{APP_PORT}...")
     # debug=False to avoid double loading or thread issues
     app.run(host=APP_HOST, port=APP_PORT, threaded=True, debug=False)

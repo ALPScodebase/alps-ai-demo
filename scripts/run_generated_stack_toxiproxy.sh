@@ -41,6 +41,7 @@ REPO_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 ENV_FILE="${ENV_FILE:-.env}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.generated.toxiproxy.yml}"
+PYTHON_BIN="${PYTHON_BIN:-python3}" # Allow overriding the Python binary, e.g. to use a virtual environment
 
 cd "$REPO_ROOT"
 
@@ -67,7 +68,8 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 echo "[TOXIPROXY] Generating Compose stack for NUM_ORACLES=${NUM_ORACLES}, NETWORK_SEED=${NETWORK_SEED}"
-if ! python3 scripts/generate_compose_toxiproxy.py \
+echo "[TOXIPROXY] Using Python binary: ${PYTHON_BIN}"
+if ! ${PYTHON_BIN} scripts/generate_compose_toxiproxy.py \
     --num-oracles "$NUM_ORACLES" \
     --network-seed "$NETWORK_SEED" \
     --out "$COMPOSE_FILE" \

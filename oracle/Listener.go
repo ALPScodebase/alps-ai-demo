@@ -218,7 +218,7 @@ func handleNewJob(ctx context.Context, rpcClient *rpc.Client, aggregatorAddress 
 // =============================================================================
 
 // MODEL_SERVICE_URL is the base URL of the Python inference service.
-const MODEL_SERVICE_URL = "http://host.docker.internal:9090"
+const MODEL_SERVICE_URL = "http://model_service:9090" //"http://host.docker.internal:9090"
 
 // processJobAsync is the background worker responsible for:
 //  1. Downloading the job payload from IPFS
