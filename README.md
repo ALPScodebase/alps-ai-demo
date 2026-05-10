@@ -81,6 +81,7 @@ To test the full system, follow this chronological sequence.
 
 -->
 
+<!--
 ### Step 1: Start the AI module
 
 Before starting the oracle containers, ensure the Python AI module (i.e., the generation and attribution service) is running and accessible at `host.docker.internal:9090`.
@@ -96,6 +97,9 @@ python3 model_server_service.py
 By default, `model_server_service.py` listens on `0.0.0.0:9090`, which is the address expected by the oracle containers through `host.docker.internal:9090`.
 
 ### Step 2: Boot the core infrastructure
+-->
+
+### Step 1: Boot the core infrastructure
 
 Thanks to the Docker orchestration, booting the entire ecosystem is highly automated. 
 

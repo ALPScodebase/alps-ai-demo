@@ -231,7 +231,25 @@ func runOracle(ctx context.Context, id, n, f int, seed int64, bootAddr, listen, 
 
 	// Starts the internal state machine and consensus loops
 	oracle.Start()
-	fmt.Printf("ORACLE %d STARTED\n", id)
+
+	// Display the oracle's operational mode.
+	maliciousMode := os.Getenv("MALICIOUS_MODE")
+	if maliciousMode == "false" {
+		// White text on green background
+		fmt.Printf(
+			"\x1b[37;42mORACLE %d STARTED (MALICIOUS MODE: %s)\x1b[0m\n",
+			id,
+			maliciousMode,
+		)
+	} else {
+		// Red text on yellow background
+		fmt.Printf(
+			"\x1b[31;43mORACLE %d STARTED (MALICIOUS MODE: %s)\x1b[0m\n",
+			id,
+			maliciousMode,
+		)
+	}	
+	//fmt.Printf("ORACLE %d STARTED (MALICIOUS MODE: %s)\n", id, maliciousMode)
 
 	// Block the main thread until the application context signals a shutdown
 	<-ctx.Done()

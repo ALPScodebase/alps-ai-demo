@@ -8,7 +8,7 @@ from flask import Flask, request, jsonify
 
 APP_PORT = int(os.getenv("MODEL_SERVER_PORT", "9090"))
 APP_HOST = os.getenv("MODEL_SERVER_HOST", "0.0.0.0")
-MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "1800"))
+MAX_NEW_TOKENS = int(os.getenv("MAX_OUTPUT_SIZE", "1800"))
 
 TRAIN_DATASET_HOLDERS_PATH = "./nanoGPT/data/shakespeare_char/holders.txt"
 TRAIN_DATASET_PATH = "./nanoGPT/data/shakespeare_char/train.bin"

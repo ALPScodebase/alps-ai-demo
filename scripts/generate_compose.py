@@ -106,6 +106,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("-n", "--num-oracles", type=int)
     parser.add_argument("-s", "--network-seed", "--seed", type=int)
+    parser.add_argument("-o", "--max-output-size", type=int)
     parser.add_argument(
         "--key-seed",
         help="Seed used for oracle Ethereum keys. Defaults to --network-seed.",

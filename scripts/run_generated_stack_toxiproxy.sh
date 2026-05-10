@@ -34,7 +34,8 @@ fi
 
 NUM_ORACLES="$1"
 NETWORK_SEED="$2"
-shift 2
+MAX_OUTPUT_SIZE="$3"
+shift 3
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)"
@@ -67,11 +68,12 @@ if [ ! -f "$ENV_FILE" ]; then
     fi
 fi
 
-echo "[TOXIPROXY] Generating Compose stack for NUM_ORACLES=${NUM_ORACLES}, NETWORK_SEED=${NETWORK_SEED}"
+echo "[TOXIPROXY] Generating Compose stack for NUM_ORACLES=${NUM_ORACLES}, NETWORK_SEED=${NETWORK_SEED}, MAX_OUTPUT_SIZE=${MAX_OUTPUT_SIZE}"
 echo "[TOXIPROXY] Using Python binary: ${PYTHON_BIN}"
 if ! ${PYTHON_BIN} scripts/generate_compose_toxiproxy.py \
     --num-oracles "$NUM_ORACLES" \
     --network-seed "$NETWORK_SEED" \
+    --max-output-size "$MAX_OUTPUT_SIZE" \
     --out "$COMPOSE_FILE" \
     --env-file "$ENV_FILE" \
     "$@"
