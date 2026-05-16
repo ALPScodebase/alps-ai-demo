@@ -11,7 +11,11 @@ module.exports = {
       blockGasLimit: 60000000, // Setting to 60M (see https://etherscan.io/chart/gaslimit)
       accounts: {
         count: 50
-      }
+      },
+      mining: {
+        auto: false,
+        interval: 12000, // mine a block every 12 seconds (see https://etherscan.io/chart/blocktime)
+      },
     },
     localhost: {
       url: "http://127.0.0.1:8545",
