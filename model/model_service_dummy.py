@@ -4,7 +4,15 @@ import time
 import threading
 import queue
 import numpy as np
+from contextlib import nullcontext
 from flask import Flask, request, jsonify
+
+# --- MODEL IMPORTS ---
+import model_utils
+import torch
+from torch.utils.data import DataLoader
+from dattri.benchmark.datasets.shakespeare_char.data import CustomDataset
+from dattri.benchmark.models.nanoGPT.model import GPT, GPTConfig
 
 APP_PORT = int(os.getenv("MODEL_SERVER_PORT", "9090"))
 APP_HOST = os.getenv("MODEL_SERVER_HOST", "0.0.0.0")
@@ -13,11 +21,30 @@ MAX_NEW_TOKENS = int(os.getenv("MAX_OUTPUT_SIZE", "1800"))
 TRAIN_DATASET_HOLDERS_PATH = "./nanoGPT/data/shakespeare_char/holders.txt"
 TRAIN_DATASET_PATH = "./nanoGPT/data/shakespeare_char/train.bin"
 MODEL_LATENCY_FILE = "./nanoGPT/model_latency.tsv"
+META_PATH = "./nanoGPT/data/shakespeare_char/meta.pkl"
+CHECKPOINT_PATH = "./nanoGPT/out-shakespeare-char/ckpt.pt"
 BLOCK_SIZE = 64
+BATCH_SIZE = 256
+NUM_SAMPLES = 1
+TOP_K_TOKENS = 200
+TEMPERATURE = 0.8
+DEVICE = "cpu"
+SEED = 1337
 NORM_FACTOR = 1e18
 FILTER_POLICIES = ["TOP_VALUES", "TOP_HOLDERS"]
 HOLDERS_MAP = np.loadtxt(TRAIN_DATASET_HOLDERS_PATH, dtype=int).tolist() # Load holders map.
+
+# Global model variables
+ctx = nullcontext()
+torch.manual_seed(SEED)
+np.random.seed(SEED)
 train_data = np.memmap(TRAIN_DATASET_PATH, dtype=np.uint16, mode='r') # Load training dataset.
+train_dataset = CustomDataset(train_data, BLOCK_SIZE)
+train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=False)
+encode_f, decode_f = model_utils.load_meta(META_PATH)
+encode = encode_f
+decode = decode_f
+model = None
 model_latency_map = None
 
 app = Flask(__name__)
@@ -26,6 +53,8 @@ app = Flask(__name__)
 JOBS = {}
 jobs_lock = threading.Lock()
 JOB_QUEUE = queue.Queue()
+OUTPUTS = {}
+outputs_lock = threading.Lock()
 
 def load_latencies():
     model_latencies = np.loadtxt(MODEL_LATENCY_FILE, delimiter="\t", skiprows=1)
@@ -41,19 +70,9 @@ def load_latencies():
         dicts.append(d)
     return dict(zip(sizes, dicts))
 
-def get_generation_time(num_tokens):
-    if not num_tokens in model_latency_map:
-        raise ValueError("Error: invalid number of tokens.")
-    m = model_latency_map[num_tokens]['gen_mean']
-    s = model_latency_map[num_tokens]['gen_std']
-    mu = np.log(m**2 / np.sqrt(s**2 + m**2))
-    sigma = np.sqrt(np.log(1 + (s**2 / m**2)))
-    delay = np.random.lognormal(mean=mu, sigma=sigma)
-    return delay
-
 def get_attribution_time(num_tokens):
     if not num_tokens in model_latency_map:
-        raise ValueError("Error: invalid number of tokens.")
+        raise ValueError("[MODEL_SERVICE] [ERROR] Invalid number of tokens.")
     m = model_latency_map[num_tokens]['att_mean']
     s = model_latency_map[num_tokens]['att_std']
     mu = np.log(m**2 / np.sqrt(s**2 + m**2))
@@ -61,8 +80,27 @@ def get_attribution_time(num_tokens):
     delay = np.random.lognormal(mean=mu, sigma=sigma)
     return delay
 
+def load_model():
+    global model
+    checkpoint = torch.load(CHECKPOINT_PATH, map_location=DEVICE)
+    gptconf = GPTConfig(**checkpoint['model_args'])
+    model = GPT(gptconf)
+    state_dict = checkpoint['model']
+    unwanted_prefix = '_orig_mod.'
+    for k,v in list(state_dict.items()):
+        if k.startswith(unwanted_prefix):
+            state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
+    model.load_state_dict(state_dict)
+    model.eval()
+    model.to(DEVICE)
+
 def generate_text(prompt):
-    time.sleep(get_generation_time(MAX_NEW_TOKENS))
+    start_ids = encode(prompt)
+    x = (torch.tensor(start_ids, dtype=torch.long, device=DEVICE)[None, ...])
+    with torch.no_grad():
+        with ctx:
+            y = model.generate(x, MAX_NEW_TOKENS, temperature=TEMPERATURE, top_k=TOP_K_TOKENS)
+            return decode(y[0].tolist())
 
 # --- ATTRIBUTION LOGIC ---
 def compute_attribution(job_id):
@@ -109,21 +147,24 @@ def process_attribution_scores(attribution_scores, filter_policy):
 def run_full_process(job_id, prompt, filter_policy, threshold):
     try:
         # A. Generation
-        print(f"[JOB {job_id}] Step 1: Generating text...")
+        print(f"[MODEL_SERVICE] [JOB {job_id}] Step 1: Generating text...")
         start_time = time.time()
-        generate_text(prompt)
+        output = generate_text(prompt)
         end_time = time.time() - start_time
-        print(f"[JOB {job_id}] Generation completed in {end_time:.2f} seconds.")
+        with outputs_lock:
+            OUTPUTS[job_id]["result"] = output
+            OUTPUTS[job_id]["status"] = "completed"
+        print(f"[MODEL_SERVICE] [JOB {job_id}] Generation completed in {end_time:.2f} seconds.")
 
         # B. Attribution
-        print(f"[JOB {job_id}] Step 2: Computing Attribution...")
+        print(f"[MODEL_SERVICE] [JOB {job_id}] Step 2: Computing Attribution...")
         start_time = time.time()
         attribution_scores = compute_attribution(job_id)
         end_time = time.time() - start_time
-        print(f"[JOB {job_id}] Attribution computed in {end_time:.2f} seconds.")
+        print(f"[MODEL_SERVICE] [JOB {job_id}] Attribution computed in {end_time:.2f} seconds.")
 
         # D. Read and Aggregate results
-        print(f"[JOB {job_id}] Step 3: Reading and aggregating attribution results...")
+        print(f"[MODEL_SERVICE] [JOB {job_id}] Step 3: Reading and aggregating attribution results...")
         holder_ids, processed_scores = process_attribution_scores(attribution_scores, filter_policy)
         sorted_list = [[holder_id, str(score)] for holder_id, score in zip(holder_ids, processed_scores)]
 
@@ -132,14 +173,17 @@ def run_full_process(job_id, prompt, filter_policy, threshold):
             JOBS[job_id]["result"] = {"sorted_list": sorted_list}
             JOBS[job_id]["status"] = "completed"
 
-        print(f"[JOB {job_id}] COMPLETED SUCCESSFULLY!")
+        print(f"[MODEL_SERVICE] [JOB {job_id}] COMPLETED SUCCESSFULLY!")
 
     except Exception as e:
-        print(f"[JOB {job_id}] CRITICAL ERROR: {str(e)}")
+        print(f"[MODEL_SERVICE] [JOB {job_id}] CRITICAL ERROR: {str(e)}")
         with jobs_lock:
             JOBS[job_id]["status"] = "error"
             JOBS[job_id]["error"] = str(e)
-        
+        with outputs_lock:
+            if OUTPUTS[job_id]["status"] != "completed":
+                OUTPUTS[job_id]["status"] = "error"
+                OUTPUTS[job_id]["error"] = str(e)
 
 # --- BACKGROUND WORKER (SEQUENTIAL EXECUTION) ---
 def background_worker():
@@ -155,10 +199,14 @@ def background_worker():
             if job_id in JOBS:
                 JOBS[job_id]["status"] = "processing"
 
+        with outputs_lock:
+            if job_id in OUTPUTS:
+                OUTPUTS[job_id]["status"] = "processing"
+
         try:
             run_full_process(job_id, prompt, filter_policy, threshold)
         except Exception as e:
-            print(f"[WORKER] Unexpected error for the job {job_id}: {e}")
+            print(f"[MODEL_SERVICE] [WORKER] Unexpected error for the job {job_id}: {e}")
         finally:
             # Alert the queue that this task is done, unlocking the next
             JOB_QUEUE.task_done()
@@ -182,7 +230,7 @@ def attribute():
 
     with jobs_lock:
         if job_id in JOBS:
-            print(f"--> [DEDUPLICATION] Duplicate request for Job {job_id}. Ignoring.")
+            print(f"[MODEL_SERVICE] [DEDUPLICATION] Duplicate request for Job {job_id}. Ignoring.")
             return jsonify({
                 "message": "Job already exists",
                 "job_id": job_id,
@@ -190,11 +238,13 @@ def attribute():
             }), 200
 
         JOBS[job_id] = {"status": "queued", "result": None}
+    
+    with outputs_lock:
+        OUTPUTS[job_id] = {"status": "queued", "result": None}
 
-    print(f"--> [NEW] Queuing Job {job_id}")
+    print(f"[MODEL_SERVICE] [NEW] Queuing Job {job_id}")
     # QUEUE THE JOB 
     JOB_QUEUE.put((job_id, prompt, filter_policy, threshold))
-
     return jsonify({"message": "Job Queued", "job_id": job_id}), 202
 
 @app.route('/result/<job_id>', methods=['GET'])
@@ -202,14 +252,22 @@ def get_result(job_id):
     job = JOBS.get(job_id)
     if not job:
         return jsonify({"error": "Job not found"}), 404
-        
     return jsonify(job), 200
+
+@app.route('/output/<job_id>', methods=['GET'])
+def get_output(job_id):
+    output = OUTPUTS.get(job_id)
+    if not output:
+        return jsonify({"error": "Output not found"}), 404
+    return jsonify(output), 200
 
 if __name__ == '__main__':
     # Load model latencies.
     model_latency_map = load_latencies()
     print("[MODEL_SERVICE] Model latencies loaded successfully!")
-    #
+    # Load the model.
+    load_model()
+    print("[MODEL_SERVICE] Model loaded successfully!")
     print(f"[MODEL_SERVICE] Supporting queries producing {MAX_NEW_TOKENS} tokens")
     # Start the background worker before exposing the API
     threading.Thread(target=background_worker, daemon=True).start()

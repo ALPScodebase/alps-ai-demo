@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Royalty Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container">
+
+        <h1>Royalty Manager Dashboard</h1>
+
+        <div class="card">
+            <h2>Last Processed Job</h2>
+            <div id="jobId">None</div>
+        </div>
+
+        <div class="card">
+            <h2>Holder Balances</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Holder</th>
+                        <th>Balance (ETH)</th>
+                    </tr>
+                </thead>
+                <tbody id="balancesTable"></tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Balance History</h2>
+            <div id="history"></div>
+        </div>
+
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
