@@ -73,4 +73,9 @@ contract RoyaltyManager {
         holders.push(_holder);
     }
 
+    // Returns the total number of registered data holders.
+    function getNumHolders() external view returns (uint256) {
+        return holders.length;
+    }
+
 }

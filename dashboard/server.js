@@ -1,15 +1,8 @@
-import dotenv from "dotenv";
-dotenv.config();
+require("dotenv").config();
 
-import express from "express";
-import cors from "cors";
-import fs from "fs";
-import path from "path";
-import { ethers } from "ethers";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const express = require("express");
+const cors = require("cors");
+const { ethers } = require("ethers");
 
 const app = express();
 
@@ -17,16 +10,15 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static("public"));
 
+// Poll interval in milliseconds.
+const POLL_INTERVAL = 5000;
 const PORT = process.env.PORT || 49999;
-
-const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
 const aggregatorAbi = ["function manager() view returns (address)"];
-const aggregator = new ethers.Contract(process.env.AGGREGATOR_ADDRESS, aggregatorAbi, provider);
-console.log("[DASHBOARD] Fetching RoyaltyManager address...");
-const royaltyManagerAddress = await aggregator.manager();
-console.log("[DASHBOARD] RoyaltyManager address:", royaltyManagerAddress);
-const royaltyManagerAbi = JSON.parse(fs.readFileSync(path.join(__dirname, "abi", "RoyaltyManager.json"), "utf8"));
-const royaltyManager = new ethers.Contract(royaltyManagerAddress, royaltyManagerAbi, provider);
+const royaltyManagerAbi = require("../chain/artifacts/contracts/RoyaltyManager.sol/RoyaltyManager.json").abi;
+
+let provider;
+let aggregator;
+let royaltyManager;
 
 // ---------------------------------------------------------
 // In-memory state
@@ -34,58 +26,71 @@ const royaltyManager = new ethers.Contract(royaltyManagerAddress, royaltyManager
 const state = {
     holders: [],
     balances: {},
-    history: [],
-    lastJobId: null,
+    rewardEvents: [], // Last 100 RewardsDistributed events (jobId + timestamp).
 };
+
+// Prints the top N holders by balance to the console.
+function printTopHolders(topN = 5) {
+    const sortedHolders = Object.entries(state.balances)
+        .sort((a, b) => parseFloat(b[1]) - parseFloat(a[1]))
+        .slice(0, topN);
+    console.log(`[DASHBOARD] Current top ${topN} holders:`);
+    sortedHolders.forEach(([holder, balance], index) => {
+        console.log(`${index + 1}. ${holder}: ${balance} ETH`);
+    });
+}
 
 // ---------------------------------------------------------
 // Load holders and balances
 // ---------------------------------------------------------
-async function refreshBalances(jobId = null) {
+async function refreshBalances() {
     const balances = {};
-    let index = 0;
-    while (true) {
+    const numHolders = await royaltyManager.getNumHolders();
+    for (let index = 0; index < numHolders; index++) {
         try {
             const holder = await royaltyManager.holders(index);
             const balance = await royaltyManager.balances(holder);
             balances[holder] = ethers.formatEther(balance);
-            index++;
-        } 
-        catch (err) {break;}
+        }
+        catch (err) {
+            console.error("[DASHBOARD] Error while fetching holder or balance:", err);
+            break;
+        }
     }
     state.holders = Object.keys(balances);
     state.balances = balances;
-    if (jobId !== null) {
-        state.lastJobId = jobId.toString();
-        state.history.push({
-            timestamp: Date.now(), 
-            jobId: jobId.toString(), 
-            balances,
-        });
-    }
     console.log("[DASHBOARD] Balances updated.");
 }
 
 // ---------------------------------------------------------
 // Initial load
 // ---------------------------------------------------------
-
 async function init() {
     await refreshBalances();
-    console.log("[DASHBOARD] Listening for RewardsDistributed events...");
-    royaltyManager.on(
-        "RewardsDistributed",
-        async (jobId) => {
-            console.log(`[DASHBOARD] RewardsDistributed for Job ID ${jobId}`);
-            await refreshBalances(jobId);
+
+    // Periodically refresh balances from the chain.
+    setInterval(async () => {
+        try {
+            await refreshBalances();
+            printTopHolders();
+        } catch (err) {
+            console.error("[DASHBOARD] Error during periodic balance refresh:", err);
         }
-    );
+    }, POLL_INTERVAL);
+
+    console.log("[DASHBOARD] Listening for RewardsDistributed events...");
+    royaltyManager.on("RewardsDistributed", (jobId) => {
+        const event = { jobId: jobId.toString(), timestamp: Date.now() };
+        console.log(`[DASHBOARD] RewardsDistributed event received for Job ID ${jobId}`);
+        // Prepend and keep only the last 100 events.
+        state.rewardEvents.unshift(event);
+        if (state.rewardEvents.length > 100) state.rewardEvents.pop();
+    });
 }
 
 // ---------------------------------------------------------
 // REST API
 // ---------------------------------------------------------
-
 app.get("/api/state", async (req, res) => {
     res.json(state);
 });
@@ -93,8 +98,14 @@ app.get("/api/state", async (req, res) => {
 // ---------------------------------------------------------
 // Start server
 // ---------------------------------------------------------
-
 app.listen(PORT, "0.0.0.0", async () => {
-    console.log(`[DASHBOARD] Server running at http://localhost:${PORT}`);
+    console.log(`[DASHBOARD] Server started. Connecting to the chain...`);
+    provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+    aggregator = new ethers.Contract(process.env.AGGREGATOR_ADDRESS, aggregatorAbi, provider);
+    console.log("[DASHBOARD] Fetching RoyaltyManager address...");
+    const royaltyManagerAddress = await aggregator.manager();
+    console.log("[DASHBOARD] RoyaltyManager address:", royaltyManagerAddress);
+    royaltyManager = new ethers.Contract(royaltyManagerAddress, royaltyManagerAbi, provider);
+    console.log(`[DASHBOARD] Server is now running at http://localhost:${PORT}.`);
     await init();
 });

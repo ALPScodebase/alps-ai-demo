@@ -6,4 +6,5 @@ interface IRoyaltyManager {
     function rewardHolders(uint256 _jobId) external payable;
     function withdraw() external;
     function registerHolder(address _holder) external;
+    function getNumHolders() external view returns (uint256);
 }

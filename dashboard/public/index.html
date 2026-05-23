@@ -1,41 +1,60 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Royalty Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
+    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
 </head>
 <body>
 
-    <div class="container">
-
-        <h1>Royalty Manager Dashboard</h1>
-
-        <div class="card">
-            <h2>Last Processed Job</h2>
-            <div id="jobId">None</div>
+<header>
+    <div class="logo">
+        <div class="logo-mark">
+            <svg viewBox="0 0 16 16"><polygon points="8,1 15,13 1,13"/></svg>
         </div>
+        <h1>Royalty Dashboard</h1>
+    </div>
+    <div class="header-right">
+        <div id="syncStatus"><span class="dot"></span>Syncing…</div>
+        <button id="refreshBtn">↻ Refresh</button>
+    </div>
+</header>
 
-        <div class="card">
-            <h2>Holder Balances</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Holder</th>
-                        <th>Balance (ETH)</th>
-                    </tr>
-                </thead>
-                <tbody id="balancesTable"></tbody>
-            </table>
+<div class="grid">
+
+    <!-- Top 10 Holders Table -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Top 10 Holders</h2>
+            <span class="card-badge" id="holderCount">— holders</span>
         </div>
-
-        <div class="card">
-            <h2>Balance History</h2>
-            <div id="history"></div>
-        </div>
-
+        <div id="balancesChart"></div>
     </div>
 
-    <script src="app.js"></script>
+    <!-- Recent Reward Events -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Last 10 Rewarded Requests</h2>
+            <span class="card-badge" id="totalEvents">— total</span>
+        </div>
+        <div class="events-list" id="eventsList"></div>
+    </div>
+
+    <!-- Requests Over Time Bar Chart -->
+    <div class="card">
+        <div class="card-header">
+            <h2>Rewarded Requests Over Time</h2>
+        </div>
+        <div id="activityChart"></div>
+    </div>
+
+</div>
+
+<script src="app.js"></script>
 </body>
 </html>
