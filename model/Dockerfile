@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 9090
 
-CMD ["python3", "model_service_dummy.py"]
+CMD ["python3", "model_service_tinystories.py"]
