@@ -7,8 +7,9 @@ echo "Forcing shutdown of all listeners..."
 pkill -f modelCreatorApprove.js
 echo "Forcing shutdown of all Telegram bot instances..."
 pkill -f bot.js
-echo "Removing log files..."
+echo "Removing Docker and log files..."
 rm *.log *.yml
+rm -rf generated
 echo "Docker is restarting..."
 systemctl --user start docker
 echo "Done!"

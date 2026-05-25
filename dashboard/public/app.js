@@ -1,12 +1,7 @@
 // ─────────────────────────────────────────────────────────────
-// Google Charts loader
-// ─────────────────────────────────────────────────────────────
-google.charts.load("current", { packages: ["corechart", "bar"] });
-
-// ─────────────────────────────────────────────────────────────
 // Config
 // ─────────────────────────────────────────────────────────────
-const SYNC_INTERVAL = 30_000; // 30 seconds
+const SYNC_INTERVAL = 60_000; // 60 seconds
 
 // ─────────────────────────────────────────────────────────────
 // DOM refs
@@ -26,7 +21,6 @@ async function loadState() {
     try {
         const res  = await fetch("/api/state");
         const data = await res.json();
-        console.log("Fetched state:", data);
         render(data);
         setSyncStatus("ok");
     } catch (err) {
@@ -40,16 +34,12 @@ async function loadState() {
 // ─────────────────────────────────────────────────────────────
 // Sync status indicator
 // ─────────────────────────────────────────────────────────────
-function setSyncStatus(state) {
-    const dot = syncStatus.querySelector(".dot");
-    if (state === "ok") {
-        dot.className = "dot";
+function setSyncStatus(status) {
+    if (status === "ok") {
         syncStatus.innerHTML = `<span class="dot"></span>Last sync: ${new Date().toLocaleTimeString()}`;
-    } else if (state === "syncing") {
-        dot.className = "dot";
-        syncStatus.innerHTML = `<span class="dot"></span>Syncing…`;
+    } else if (status === "syncing") {
+        syncStatus.innerHTML = `<span class="dot"></span>Syncing...`;
     } else {
-        dot.className = "dot stale";
         syncStatus.innerHTML = `<span class="dot stale"></span>Sync failed`;
     }
 }
@@ -58,30 +48,20 @@ function setSyncStatus(state) {
 // Master render
 // ─────────────────────────────────────────────────────────────
 function render(state) {
-    const { holders = [], balances = {}, rewardEvents = [] } = state;
+    const { holders = [], balances = {}, rewardEvents = [], jobEvents = [] } = state;
 
     holderCount.textContent = `${holders.length} holders`;
     totalEvents.textContent = `${rewardEvents.length} total`;
 
     drawBalancesTable(balances);
-
-    google.charts.setOnLoadCallback(() => {
-        drawActivityChart(rewardEvents);
-    });
-
-    // In case charts are already loaded (subsequent renders)
-    if (google.visualization) {
-        drawActivityChart(rewardEvents);
-    }
-
-    drawEventsList(rewardEvents);
+    drawEventsList(rewardEvents, jobEvents);
 }
 
 // ─────────────────────────────────────────────────────────────
 // Table — Top 10 Holders
 // ─────────────────────────────────────────────────────────────
 function drawBalancesTable(balances) {
-    const container = document.getElementById("balancesChart");
+    const container = document.getElementById("balancesTable");
 
     const top10 = Object.entries(balances)
         .map(([addr, bal]) => ({ addr, bal: parseFloat(bal) }))
@@ -116,84 +96,48 @@ function drawBalancesTable(balances) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Chart — Rewarded Requests Over Time (Column, 1-minute buckets)
+// Events list — last 10 rewarded jobs
+//
+// Each row combines a rewardEvent (jobId, submitter, timestamp)
+// with its matching jobEvent (ipfsCid, promptText) looked up by
+// jobId. Fields shown: job ID, date, submitter, prompt text.
 // ─────────────────────────────────────────────────────────────
-function drawActivityChart(rewardEvents) {
-    const container = document.getElementById("activityChart");
-
-    if (rewardEvents.length === 0) {
-        container.innerHTML = `<div class="empty-state">No reward events recorded yet.</div>`;
-        return;
-    }
-
-    // Bucket events into 1-minute intervals
-    const BUCKET_MS = 60 * 1000;
-    const buckets   = {};
-
-    for (const ev of rewardEvents) {
-        const bucket = Math.floor(ev.timestamp / BUCKET_MS) * BUCKET_MS;
-        buckets[bucket] = (buckets[bucket] || 0) + 1;
-    }
-
-    const sorted = Object.entries(buckets)
-        .sort((a, b) => Number(a[0]) - Number(b[0]));
-
-    const data = new google.visualization.DataTable();
-    data.addColumn("string", "Time");
-    data.addColumn("number", "Requests");
-
-    for (const [ts, count] of sorted) {
-        const label = new Date(Number(ts)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        data.addRow([label, count]);
-    }
-
-    const options = {
-        backgroundColor: "transparent",
-        chartArea:       { left: 56, top: 16, width: "92%", height: "78%" },
-        bar:             { groupWidth: "60%" },
-        legend:          { position: "none" },
-        hAxis: {
-            textStyle:     { color: "#4a5060", fontName: "Space Mono", fontSize: 10 },
-            gridlines:     { color: "transparent" },
-            baselineColor: "#1e2229",
-        },
-        vAxis: {
-            textStyle:     { color: "#4a5060", fontName: "Space Mono", fontSize: 10 },
-            gridlines:     { color: "#1e2229" },
-            baselineColor: "#1e2229",
-            minValue: 0,
-            format: "#",
-        },
-        colors:  ["#7b61ff"],
-        tooltip: { textStyle: { fontName: "Space Mono", fontSize: 11, color: "#e8eaf0" } },
-    };
-
-    const chart = new google.visualization.ColumnChart(container);
-    chart.draw(data, options);
-}
-
-// ─────────────────────────────────────────────────────────────
-// Recent events list — last 10
-// ─────────────────────────────────────────────────────────────
-function drawEventsList(rewardEvents) {
+function drawEventsList(rewardEvents, jobEvents) {
     eventsList.innerHTML = "";
 
     if (rewardEvents.length === 0) {
-        eventsList.innerHTML = `<div class="empty-state">Waiting for reward events…</div>`;
+        eventsList.innerHTML = `<div class="empty-state">Waiting for reward events...</div>`;
         return;
     }
+
+    // Build a lookup map from jobId → jobEvent for O(1) access.
+    const jobMap = new Map(jobEvents.map((e) => [e.jobId, e]));
 
     const recent = rewardEvents.slice(0, 10);
 
     for (const ev of recent) {
-        const row  = document.createElement("div");
-        row.className = "event-row";
+        const job  = jobMap.get(ev.jobId);
         const ts   = new Date(ev.timestamp);
         const date = ts.toLocaleDateString([], { month: "short", day: "numeric" });
         const time = ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+        const row = document.createElement("div");
+        row.className = "event-row";
         row.innerHTML = `
-            <div class="job"><span>JOB</span>${ev.jobId}</div>
-            <div class="ts">${date} · ${time}</div>
+            <div class="event-main">
+                <div class="event-top">
+                    <span class="job"><span class="job-label">JOB</span>${ev.jobId}</span>
+                    <span class="ts">${date} · ${time}</span>
+                </div>
+                <div class="event-detail">
+                    <span class="detail-label">Submitter</span>
+                    <span class="detail-value address">${ev.submitter ?? "—"}</span>
+                </div>
+                <div class="event-detail">
+                    <span class="detail-label">Prompt</span>
+                    <span class="detail-value prompt">${job?.promptText ?? "—"}</span>
+                </div>
+            </div>
         `;
         eventsList.appendChild(row);
     }
@@ -212,4 +156,4 @@ function shortenAddress(addr) {
 // ─────────────────────────────────────────────────────────────
 refreshBtn.addEventListener("click", loadState);
 setInterval(loadState, SYNC_INTERVAL);
-google.charts.setOnLoadCallback(loadState);
+loadState();

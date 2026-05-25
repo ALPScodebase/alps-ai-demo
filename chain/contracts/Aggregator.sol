@@ -92,6 +92,11 @@ contract Aggregator is IAggregator {
         return verifier.getResult(_jobId);
     }
 
+    // Returns the submitter of a completed job by querying the OracleVerifier contract.
+    function getResultSubmitter(uint256 _jobId) external override view returns (address) {
+        return verifier.getResultSubmitter(_jobId);
+    }
+
     // Checks if the job is completed by querying the OracleVerifier contract.
     function isCompleted(uint256 _jobId) external override view returns (bool) {
         return verifier.isCompleted(_jobId);

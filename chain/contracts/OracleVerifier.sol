@@ -135,12 +135,21 @@ contract OracleVerifier is IOracleVerifier {
         aggregator.distributeRewards(payable(transmitter), jobId);
     }
 
+    // Returns the result of a completed job.
     function getResult(uint256 _jobId) external override view returns (int128[] memory, address, uint256) {
         require(results[_jobId].saved, "Result not found");
         return (results[_jobId].flatMatrix, results[_jobId].submitter, results[_jobId].timestamp);
     }
 
+    // Returns the submitter of a completed job.
+    function getResultSubmitter(uint256 _jobId) external override view returns (address) {
+        require(results[_jobId].saved, "Result not found");
+        return results[_jobId].submitter;
+    }
+
+    // Checks if the job is completed.
     function isCompleted(uint256 _jobId) external override view returns (bool) {
         return results[_jobId].saved;
     }
+
 }

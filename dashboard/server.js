@@ -15,11 +15,16 @@ const RETRY_DELAY = 5_000;  // ms before retrying after a failure
 const MAX_RETRIES = 3;
 const PORT = process.env.PORT || 49999;
 
-const aggregatorAbi     = ["function manager() view returns (address)"];
+const aggregatorAbi     = require("../chain/artifacts/contracts/Aggregator.sol/Aggregator.json").abi;
 const royaltyManagerAbi = require("../chain/artifacts/contracts/RoyaltyManager.sol/RoyaltyManager.json").abi;
+const oracleQueueAbi    = require("../chain/artifacts/contracts/OracleQueue.sol/OracleQueue.json").abi;
 
 // Resolved once at startup never changes.
 let royaltyManagerAddress;
+let oracleQueueAddress;
+
+// IPFS client instance (initialized at startup).
+let ipfs;
 
 // ---------------------------------------------------------
 // In-memory state
@@ -28,6 +33,7 @@ const state = {
     holders:      [],
     balances:     {},
     rewardEvents: [], // last 100 RewardsDistributed events (jobId + timestamp)
+    jobEvents:    []  // last 100 LogNewJobForOracles events (jobId + timestamp)
 };
 
 // ---------------------------------------------------------
@@ -41,6 +47,17 @@ function printTopHolders(topN = 5) {
     sorted.forEach(([holder, balance], i) => {
         console.log(`  ${i + 1}. ${holder}: ${balance} ETH`);
     });
+}
+
+async function getPromptText(cid) {
+    const chunks = [];
+    const stream = ipfs.cat(cid);
+    for await (const chunk of stream) {
+        chunks.push(chunk);
+    }
+    const fileBuffer = Buffer.concat(chunks)
+    const content = fileBuffer.toString()
+    return content;
 }
 
 // ---------------------------------------------------------
@@ -95,28 +112,56 @@ async function refreshBalancesWithRetry() {
 }
 
 // ---------------------------------------------------------
-// RewardsDistributed event listener
+// Event listener
 // ---------------------------------------------------------
 function startEventListener() {
-    console.log("[DASHBOARD] Starting RewardsDistributed event listener...");
-
+    console.log("[DASHBOARD] Starting event listeners...");
     const provider = new ethers.JsonRpcProvider(process.env.RPC_URL);
+    const aggregator = new ethers.Contract(process.env.AGGREGATOR_ADDRESS, aggregatorAbi, provider);
     const royaltyManager = new ethers.Contract(royaltyManagerAddress, royaltyManagerAbi, provider);
+    const oracleQueue = new ethers.Contract(oracleQueueAddress, oracleQueueAbi, provider);
 
-    royaltyManager.on("RewardsDistributed", (jobId) => {
-        const event = { jobId: jobId.toString(), timestamp: Date.now() };
+    // Listen for RewardsDistributed events to update the rewardEvents state.
+    royaltyManager.on("RewardsDistributed", async (jobId) => {
         console.log(`[DASHBOARD] RewardsDistributed received for Job ID ${jobId}`);
+        let submitter = "";
+        try {submitter = await aggregator.getResultSubmitter(jobId);} 
+        catch (err) {
+            console.error(`[DASHBOARD] Failed to fetch submitter for Job ID ${jobId}: ${err.message}`);
+        }
+        console.log(`[DASHBOARD] Submitter for Job ID ${jobId}: ${submitter}`);
+        const event = { jobId: jobId.toString(), submitter: submitter, timestamp: Date.now() };
         state.rewardEvents.unshift(event);
         if (state.rewardEvents.length > 100) state.rewardEvents.pop();
     });
 
+    // Listen for LogNewJobForOracles events to update the jobEvents state.
+    oracleQueue.on("LogNewJobForOracles", async (jobId, ipfsCid) => {
+        console.log(`[DASHBOARD] LogNewJobForOracles received for Job ID ${jobId} (CID: ${ipfsCid})`);
+        let promptText = "";
+        try {promptText = await getPromptText(ipfsCid.toString());}
+        catch (err) {
+            console.error(`[DASHBOARD] Failed to fetch prompt text for CID ${ipfsCid}: ${err.message}`);
+        }
+        console.log(`[DASHBOARD] Prompt text for Job ID ${jobId}: ${promptText}`);
+        const event = { 
+            jobId: jobId.toString(), 
+            ipfsCid: ipfsCid.toString(), 
+            promptText: promptText, 
+            timestamp: Date.now() 
+        };
+        state.jobEvents.unshift(event);
+        if (state.jobEvents.length > 100) state.jobEvents.pop();
+    });
+
     provider.on("error", (err) => {
-        console.error(`[DASHBOARD] Event provider error (${err.message}), reconnecting in ${RETRY_DELAY / 1000}s...`);
+        console.error(`[DASHBOARD] Event provider error: ${err.message}`);
+        console.error(`[DASHBOARD] Event provider reconnecting in ${RETRY_DELAY / 1000}s...`);
         provider.destroy();
         setTimeout(startEventListener, RETRY_DELAY);
     });
 
-    console.log("[DASHBOARD] RewardsDistributed event listener ready.");
+    console.log("[DASHBOARD] Event listeners ready.");
 }
 
 // ---------------------------------------------------------
@@ -147,6 +192,9 @@ app.get("/api/state", (req, res) => {
 // ---------------------------------------------------------
 app.listen(PORT, "0.0.0.0", async () => {
     console.log("[DASHBOARD] Server started.");
+    console.log("[DASHBOARD] Connecting to IPFS...");
+    const { create } = await import("kubo-rpc-client");
+    ipfs = create({ url: process.env.IPFS_API_URL || "http://127.0.0.1:5001" });
     console.log("[DASHBOARD] Connecting to the chain...");
     const bootstrapProvider = new ethers.JsonRpcProvider(process.env.RPC_URL);
     try {
@@ -156,7 +204,9 @@ app.listen(PORT, "0.0.0.0", async () => {
             bootstrapProvider
         );
         royaltyManagerAddress = await aggregator.manager();
+        oracleQueueAddress = await aggregator.queue();
         console.log("[DASHBOARD] RoyaltyManager address:", royaltyManagerAddress);
+        console.log("[DASHBOARD] OracleQueue address:", oracleQueueAddress);
     } finally {
         bootstrapProvider.destroy();
     }

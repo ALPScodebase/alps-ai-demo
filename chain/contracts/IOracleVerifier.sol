@@ -12,5 +12,6 @@ interface IOracleVerifier {
         bytes32 rawVs
     ) external;
     function getResult(uint256 _jobId) external view returns (int128[] memory, address, uint256);
+    function getResultSubmitter(uint256 _jobId) external view returns (address);
     function isCompleted(uint256 _jobId) external view returns (bool);
 }
